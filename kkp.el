@@ -427,14 +427,15 @@ contains the specific logic for processing sequences terminated by ?u or
          (secondary-keycode (and (stringp secondary-keycode-str)
                                  (not (string-empty-p secondary-keycode-str))
                                  secondary-keycode-str))
-         (is-shifted (and secondary-keycode
-                          (not (member (string-to-number primary-keycode) kkp--printable-ascii-letters))))
-         (final-key-code (if is-shifted secondary-keycode primary-keycode))
          (modifier-parts (split-string (or (cl-second input-parts) "") ":")) ;; list of modifiers and event types
          (modifier-string (cl-first modifier-parts))
          (modifier-num (if (not (string-empty-p modifier-string))
                            (1- (string-to-number modifier-string))
-                         0)))
+                         0))
+         (is-shifted (and secondary-keycode
+                          (or (eq modifier-num 3) ;; alt-shift
+                              (not (member (string-to-number primary-keycode) kkp--printable-ascii-letters)))))
+         (final-key-code (if is-shifted secondary-keycode primary-keycode)))
 
     ;; if shifted keycode exists, remove shift from modifier number
     (when is-shifted
