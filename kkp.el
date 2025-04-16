@@ -6,7 +6,7 @@
 ;; Maintainer: Benjamin Orthen <contact@orthen.net>
 ;; Keywords: terminals
 ;; Version: 0.4
-;; URL: https://github.com/benjaminor/kkp
+;; URL: https://github.com/benotn/kkp
 ;; Package-Requires: ((emacs "27.1") (compat "29.1.3.4"))
 
 ;; This file is not part of GNU Emacs.

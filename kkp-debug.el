@@ -4,7 +4,7 @@
 ;; Author: Benjamin Orthen <contact@orthen.net>
 ;; Maintainer: Benjamin Orthen <contact@orthen.net>
 ;; Version: 0.4
-;; URL: https://github.com/benjaminor/kkp
+;; URL: https://github.com/benotn/kkp
 ;; Package-Requires: ((emacs "27.1") (compat "29.1.3.4"))
 ;; Keywords: terminals, debugging
 

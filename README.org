@@ -70,7 +70,7 @@ This means "M-S-." (Meta-Shift-.) is not translated to "M-:" (on a German keyboa
 (define-key key-translation-map (kbd "M-S-.") (kbd "M-:"))
 #+end_src
 
-For an automated solution, see the code setup in [[https://github.com/benjaminor/kkp/issues/15#issue-2782693357][this issue]] (and consider using the newly introduced hooks).
+For an automated solution, see the code setup in [[https://github.com/benotn/kkp/issues/15#issue-2782693357][this issue]] (and consider using the newly introduced hooks).
 
 ** Debugging
 
