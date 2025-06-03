@@ -693,6 +693,11 @@ does not have focus, as input from this terminal cannot be reliably read."
       (setq kkp--suspended-terminal-list (delete terminal kkp--suspended-terminal-list))
       (kkp-enable-in-terminal terminal))))
 
+(defun kkp-enable-for-client-frame (frame)
+  "Enable KKP for the given client FRAME."
+  (with-selected-frame frame
+    (kkp-enable-in-terminal (frame-terminal frame))))
+
 
 (cl-defun kkp-enable-in-terminal (&optional (terminal (kkp--selected-terminal)))
   "Try to enable KKP support in Emacs running in the TERMINAL."
@@ -758,6 +763,10 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (add-hook 'suspend-hook #'kkp--suspend-in-terminal)
     (add-hook 'suspend-resume-hook #'kkp--resume-in-terminal)
 
+    ;; Add hook for emacsclient frames
+    (if (boundp 'server-after-make-frame-hook)
+        (add-hook 'server-after-make-frame-hook #'kkp-enable-for-client-frame))
+
     ;; this is by far the most reliable method to enable kkp in all associated terminals
     ;; trying to switch to each terminal with `with-selected-frame' does not work very well
     ;; as input from `read-event' cannot be reliably read from the corresponding terminal
@@ -776,6 +785,9 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (remove-hook 'kill-emacs-hook #'kkp--disable-in-active-terminals)
     (remove-hook 'suspend-hook #'kkp--suspend-in-terminal)
     (remove-hook 'suspend-resume-hook #'kkp--resume-in-terminal)
+    ;; Remove hook for emacsclient frames
+    (if (boundp 'server-after-make-frame-hook)
+        (remove-hook 'server-after-make-frame-hook #'kkp-enable-for-client-frame))
     (remove-function after-focus-change-function #'kkp-focus-change)
     (setq delete-terminal-functions (delete #'kkp--terminal-teardown delete-terminal-functions)))))
 
