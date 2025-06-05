@@ -427,17 +427,28 @@ contains the specific logic for processing sequences terminated by ?u or
          (secondary-keycode (and (stringp secondary-keycode-str)
                                  (not (string-empty-p secondary-keycode-str))
                                  secondary-keycode-str))
-         (is-shifted (and secondary-keycode
-                          (not (member (string-to-number primary-keycode) kkp--printable-ascii-letters))))
-         (final-key-code (if is-shifted secondary-keycode primary-keycode))
          (modifier-parts (split-string (or (cl-second input-parts) "") ":")) ;; list of modifiers and event types
          (modifier-string (cl-first modifier-parts))
          (modifier-num (if (not (string-empty-p modifier-string))
                            (1- (string-to-number modifier-string))
-                         0)))
+                         0))
+         (has-shift (/= 0 (logand modifier-num 1)))
+         (has-ctrl (/= 0 (logand modifier-num 4)))
+         (is-ascii-letter (member (string-to-number primary-keycode) kkp--printable-ascii-letters))
+         ;; -------------------------------------------------------------
+         ;; Shift-collapse rule:
+         ;;   • Shift present
+         ;;   • secondary code available
+         ;;   • no Control *when key is an ASCII letter*
+         ;; -------------------------------------------------------------
+         (use-secondary (and secondary-keycode
+                             has-shift
+                             (or (not is-ascii-letter)
+                                 (not has-ctrl))))
+         (final-key-code (if use-secondary secondary-keycode primary-keycode)))
 
-    ;; if shifted keycode exists, remove shift from modifier number
-    (when is-shifted
+    ;; if we use the secondary keycode, remove shift from modifier number
+    (when use-secondary
       (setq modifier-num (logand modifier-num (lognot 1))))
 
     ;; create keybinding by concatenating the modifier string with the key-name
