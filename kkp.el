@@ -432,8 +432,8 @@ contains the specific logic for processing sequences terminated by ?u or
          (modifier-num (if (not (string-empty-p modifier-string))
                            (1- (string-to-number modifier-string))
                          0))
-         (has-shift (/= 0 (logand modifier-num 1)))
-         (has-ctrl (/= 0 (logand modifier-num 4)))
+         (has-shift (/= 0 (logand modifier-num (kkp--mod-bits 'shift))))
+         (has-ctrl (/= 0 (logand modifier-num (kkp--mod-bits 'control))))
          (is-ascii-letter (member (string-to-number primary-keycode) kkp--printable-ascii-letters))
          ;; -------------------------------------------------------------
          ;; Shift-collapse rule:
