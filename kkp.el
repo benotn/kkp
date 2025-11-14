@@ -649,39 +649,44 @@ does not have focus, as input from this terminal cannot be reliably read."
   (let ((terminal-input "")
         (terminal (kkp--selected-terminal))
         chr)
-    (while (and (setq chr (read-event nil nil kkp-terminal-query-timeout)) (not (equal chr ?c)))
+    ;; Read all events until timeout to capture complete response
+    (while (setq chr (read-event nil nil kkp-terminal-query-timeout))
       (setq terminal-input (concat terminal-input (string chr))))
 
     ;; remove the setup-started parameter as soon as possible
     ;; to enable another try if somehow the string-match-p evaluates to nil
     (set-terminal-parameter terminal 'kkp--setup-started nil)
 
-    ;; Condition: CSI?<flags>u CSI?...c must be in response
-    ;; CSI? is already in response as it was registered as handler for the async request
-    ;; thus it is not in terminal-input.
-    (when (string-match-p (rx line-start
-                              (+ digit) ;; <flags>
-                              "u\e[?"
-                              (+ anychar) ;; primary device attributes
-                              eol) terminal-input)
+    ;; Condition: Response must contain both 'c' (device attributes) and 'u' (KKP flags)
+    ;; CSI? is already consumed as it was registered as handler for the async request
+    ;; Accept both response orders:
+    ;; 1. <flags>u\e[?<device-attr>c
+    ;; 2. <device-attr>c\e[?<flags>u
+    (let ((pattern1-match (string-match-p (rx (+ digit) ;; <flags>
+                                              "u\e[?"
+                                              (* anychar) ;; primary device attributes
+                                              "c") terminal-input))
+          (pattern2-match (string-match-p (rx (* anychar) ;; primary device attributes
+                                              "c\e[?"
+                                              (+ digit) ;; <flags>
+                                              "u") terminal-input)))
+      (when (or pattern1-match pattern2-match)
+        (unless (member terminal kkp--active-terminal-list)
+          (let ((enhancement-flag (kkp--calculate-flags-integer)))
+            (unless (eq enhancement-flag 0)
+              (push terminal kkp--active-terminal-list)
+              (send-string-to-terminal (kkp--csi-escape (format ">%su" enhancement-flag)) terminal)
 
-      (unless (member terminal kkp--active-terminal-list)
-        (let ((enhancement-flag (kkp--calculate-flags-integer)))
-          (unless (eq enhancement-flag 0)
+              (kkp-setup-function-keys terminal)
+              (set-terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val (terminal-parameter terminal 'normal-erase-is-backspace))
+              (normal-erase-is-backspace-mode 1)
 
-            (push terminal kkp--active-terminal-list)
-            (send-string-to-terminal (kkp--csi-escape (format ">%su" enhancement-flag)) terminal)
-
-            (kkp-setup-function-keys terminal)
-            (set-terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val (terminal-parameter terminal 'normal-erase-is-backspace))
-            (normal-erase-is-backspace-mode 1)
-
-            ;; we register functions for each prefix to not interfere with e.g., M-[ I
-            (with-selected-frame (car (frames-on-display-list terminal))
-              (dolist (prefix kkp--key-prefixes)
-                (define-key input-decode-map (kkp--csi-escape (string prefix))
-                            (lambda (_prompt) (kkp--process-keys prefix))))
-              (run-hooks 'kkp-terminal-setup-complete-hook))))))))
+              ;; we register functions for each prefix to not interfere with e.g., M-[ I
+              (with-selected-frame (car (frames-on-display-list terminal))
+                (dolist (prefix kkp--key-prefixes)
+                  (define-key input-decode-map (kkp--csi-escape (string prefix))
+                              (lambda (_prompt) (kkp--process-keys prefix))))
+                (run-hooks 'kkp-terminal-setup-complete-hook)))))))))
 
 
 (defun kkp--disable-in-active-terminals()
