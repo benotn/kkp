@@ -69,9 +69,37 @@
   :group 'convenience
   :prefix "kkp-")
 
-(defcustom kkp-terminal-query-timeout 0.1
+(defcustom kkp-terminal-query-timeout 2
   "Seconds to wait for an answer from the terminal. Nil means no timeout."
   :type 'float)
+
+(defcustom kkp-verbose nil
+  "When non-nil, echo KKP state and helpful messages to the echo area.
+Useful for debugging slow SSH, strange terminals, or setup/teardown."
+  :type 'boolean)
+
+(defun kkp--verbose (format &rest args)
+  "Like `message', but only when `kkp-verbose' is non-nil."
+  (when kkp-verbose
+    (apply #'message (concat "[KKP] " format) args)))
+
+(defun kkp--format-bytes-and-readable (bytes)
+  "Return a string describing BYTES in both byte list and human-readable form.
+BYTES is a list of character codes (integers), or a string (converted via
+string-to-list).  Human-readable: ESC as \\e, other control chars as \\xNN."
+  (when (stringp bytes)
+    (setq bytes (string-to-list bytes)))
+  (if (null bytes)
+      "bytes=() readable=\"\""
+    (let ((bytes-str (format "%s" bytes))
+          (readable (mapconcat (lambda (b)
+                                 (cond ((eq b 27) "\\e")
+                                       ((and (>= b 0) (< b 32)) (format "\\x%02x" b))
+                                       ((= b 127) "\\x7f")
+                                       ((>= b 128) (format "\\x%02x" b))
+                                       (t (string b))))
+                               bytes "")))
+      (format "bytes=%s readable=%S" bytes-str readable))))
 
 (defcustom kkp-active-enhancements
   '(disambiguate-escape-codes report-alternate-keys)
@@ -85,8 +113,8 @@ Possible values are the keys in `kkp--progressive-enhancement-flags'."
 
 (defconst kkp--modifiers
   '(choice (const shift) (const alt) (const control)
-           (const super) (const hyper) (const meta)
-           (const caps-lock) (const num-lock)))
+    (const super) (const hyper) (const meta)
+    (const caps-lock) (const num-lock)))
 
 ;; These mirror the behavior of `mac-command-modifier' and friends.
 ;; They specify which virtual key the physical key maps to.
@@ -328,8 +356,8 @@ It is one of the symbols `shift', `alt', `control', `super',
       (define-key map [iso-lefttab] [backtab])
       (define-key map [S-iso-lefttab] [backtab]))
     (and (or (eq system-type 'windows-nt)
-	         (featurep 'ns))
-	     (define-key map [S-tab] [backtab]))
+	     (featurep 'ns))
+	 (define-key map [S-tab] [backtab]))
     map)
   "Keymap of possible alternative meanings for some keys.")
 
@@ -519,8 +547,11 @@ This function returns the Emacs keybinding associated with the sequence read."
 
 (defun kkp--query-terminal-sync (query)
   "Send QUERY to TERMINAL (to current if nil) and return response (if any)."
+  (kkp--verbose "query (sync): sending CSI %S (timeout %s s)" query (or kkp-terminal-query-timeout "none"))
   (discard-input)
   (send-string-to-terminal (kkp--csi-escape query))
+  (when (fboundp 'flush-standard-output)
+    (flush-standard-output))
   (let ((loop-cond t)
         (terminal-input nil))
     (while loop-cond
@@ -528,7 +559,12 @@ This function returns the Emacs keybinding associated with the sequence read."
         (if (null evt)
             (setq loop-cond nil)
           (push evt terminal-input))))
-    (nreverse terminal-input)))
+    (let ((reply (nreverse terminal-input)))
+      (kkp--verbose "query (sync): got %s bytes%s" (length reply)
+                    (if (null reply)
+                        " (no reply; slow SSH or non-KKP?)"
+                      (concat " " (kkp--format-bytes-and-readable reply))))
+      reply)))
 
 
 (defun kkp--query-terminal-async (query handlers terminal)
@@ -550,13 +586,17 @@ This function code is copied from `xterm--query'."
                              []))))))
 
       (funcall register handlers)
-      (send-string-to-terminal (kkp--csi-escape query) terminal))))
+      (kkp--verbose "query (async): sending CSI %S to terminal" query)
+      (send-string-to-terminal (kkp--csi-escape query) terminal)
+      (when (fboundp 'flush-standard-output)
+        (flush-standard-output)))))
 
 
 (defun kkp--this-terminal-enabled-enhancements ()
   "Query the current terminal and return list of currently enabled enhancements."
   (let ((reply (kkp--query-terminal-sync "?u")))
     (when (not reply)
+      (kkp--verbose "terminal did not reply; possible slow SSH or non-KKP terminal")
       (error "Terminal did not reply correctly to query"))
 
     (let ((enhancement-flag (- (nth 3 reply) ?0))
@@ -572,11 +612,14 @@ This function code is copied from `xterm--query'."
   "Check if the current terminal supports the Kitty Keyboard Protocol.
 This does not work well if checking for another terminal which
 does not have focus, as input from this terminal cannot be reliably read."
+  (kkp--verbose "checking if terminal supports KKP...")
   (let ((reply (kkp--query-terminal-sync "?u")))
-    (and
-     (member (length reply) '(5 6))
-     (equal '(27 91 63) (cl-subseq reply 0 3))
-     (eql 117 (car (last reply))))))
+    (let ((supported (and
+                      (member (length reply) '(5 6))
+                      (equal '(27 91 63) (cl-subseq reply 0 3))
+                      (eql 117 (car (last reply))))))
+      (kkp--verbose "terminal %s KKP (reply length=%s)" (if supported "supports" "does not support") (length reply))
+      supported)))
 
 (defun kkp--this-terminal-has-active-kkp-p()
   "Check if the current terminal has KKP activated."
@@ -623,10 +666,14 @@ again later if needed."
 
 (defun kkp--terminal-teardown (terminal)
   "Run procedures to disable KKP in TERMINAL."
+  (kkp--verbose "teardown in terminal (live=%s, was active=%s)"
+                (terminal-live-p terminal)
+                (member terminal kkp--active-terminal-list))
   (when
       (and
        (terminal-live-p terminal)
        (member terminal kkp--active-terminal-list))
+    (kkp--verbose "disabling KKP: sending <u, restoring keymaps")
     (kkp-teardown-function-keys terminal)
     (send-string-to-terminal (kkp--csi-escape "<u") terminal)
 
@@ -659,29 +706,31 @@ does not have focus, as input from this terminal cannot be reliably read."
     ;; Condition: CSI?<flags>u CSI?...c must be in response
     ;; CSI? is already in response as it was registered as handler for the async request
     ;; thus it is not in terminal-input.
-    (when (string-match-p (rx line-start
-                              (+ digit) ;; <flags>
-                              "u\e[?"
-                              (+ anychar) ;; primary device attributes
-                              eol) terminal-input)
-
-      (unless (member terminal kkp--active-terminal-list)
-        (let ((enhancement-flag (kkp--calculate-flags-integer)))
-          (unless (eq enhancement-flag 0)
-
-            (push terminal kkp--active-terminal-list)
-            (send-string-to-terminal (kkp--csi-escape (format ">%su" enhancement-flag)) terminal)
-
-            (kkp-setup-function-keys terminal)
-            (set-terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val (terminal-parameter terminal 'normal-erase-is-backspace))
-            (normal-erase-is-backspace-mode 1)
-
-            ;; we register functions for each prefix to not interfere with e.g., M-[ I
-            (with-selected-frame (car (frames-on-display-list terminal))
-              (dolist (prefix kkp--key-prefixes)
-                (define-key input-decode-map (kkp--csi-escape (string prefix))
-                            (lambda (_prompt) (kkp--process-keys prefix))))
-              (run-hooks 'kkp-terminal-setup-complete-hook))))))))
+    (if (string-match-p (rx line-start
+                            (+ digit) ;; <flags>
+                            "u\e[?"
+                            (+ anychar) ;; primary device attributes
+                            eol) terminal-input)
+        (progn
+          (kkp--verbose "setup response matched (terminal supports KKP)")
+          (unless (member terminal kkp--active-terminal-list)
+            (let ((enhancement-flag (kkp--calculate-flags-integer)))
+              (if (eq enhancement-flag 0)
+                  (kkp--verbose "no enhancements to enable (flag=0); skipping")
+                (kkp--verbose "enabling KKP: sending >%su, setting keymaps" enhancement-flag)
+                (push terminal kkp--active-terminal-list)
+                (send-string-to-terminal (kkp--csi-escape (format ">%su" enhancement-flag)) terminal)
+                (kkp-setup-function-keys terminal)
+                (set-terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val (terminal-parameter terminal 'normal-erase-is-backspace))
+                (normal-erase-is-backspace-mode 1)
+                (with-selected-frame (car (frames-on-display-list terminal))
+                  (dolist (prefix kkp--key-prefixes)
+                    (define-key input-decode-map (kkp--csi-escape (string prefix))
+                                (lambda (_prompt) (kkp--process-keys prefix))))
+                  (run-hooks 'kkp-terminal-setup-complete-hook))
+                (kkp--verbose "setup complete; enhancements active"))))))
+    (kkp--verbose "setup response did not match (slow SSH? non-Kitty?); %s"
+                  (kkp--format-bytes-and-readable terminal-input))))
 
 
 (defun kkp--disable-in-active-terminals()
@@ -694,6 +743,7 @@ does not have focus, as input from this terminal cannot be reliably read."
   "If the terminal has activate KKP, disable it before suspending."
   (let ((terminal (kkp--selected-terminal)))
     (when (member terminal kkp--active-terminal-list)
+      (kkp--verbose "suspending: tearing down KKP in terminal")
       (push terminal kkp--suspended-terminal-list)
       (kkp--terminal-teardown terminal))))
 
@@ -701,6 +751,7 @@ does not have focus, as input from this terminal cannot be reliably read."
   "Restore KKP in resumed terminals where it was active before suspension."
   (let ((terminal (kkp--selected-terminal)))
     (when (member terminal kkp--suspended-terminal-list)
+      (kkp--verbose "resuming: re-enabling KKP in terminal")
       (setq kkp--suspended-terminal-list (delete terminal kkp--suspended-terminal-list))
       (kkp-enable-in-terminal terminal))))
 
@@ -713,11 +764,13 @@ does not have focus, as input from this terminal cannot be reliably read."
        (terminal-live-p terminal)
        (not (display-graphic-p terminal)))
     (push terminal kkp--setup-visited-terminal-list)
-    (unless
-        (or
-         (terminal-parameter terminal 'kkp--setup-started)
-         (member terminal kkp--active-terminal-list))
-
+    (cond
+     ((terminal-parameter terminal 'kkp--setup-started)
+      (kkp--verbose "skipping enable: setup already in progress"))
+     ((member terminal kkp--active-terminal-list)
+      (kkp--verbose "skipping enable: KKP already active in this terminal"))
+     (t
+      (kkp--verbose "enabling KKP in terminal...")
       ;; NOTE: to avoid race conditions, we set the custom terminal
       ;; parameter here to not send the query multiple times to the
       ;; terminal
@@ -725,7 +778,7 @@ does not have focus, as input from this terminal cannot be reliably read."
       ;; https://sw.kovidgoyal.net/kitty/keyboard-protocol/#detection-of-support-for-this-protocol
       ;; query for the current progressive enhancements together with the primary device attributes
       (kkp--query-terminal-async "?u\e[c"
-                                 '(("\e[?" . kkp--terminal-setup)) terminal))))
+                                 '(("\e[?" . kkp--terminal-setup)) terminal)))))
 
 ;;;###autoload
 (defun kkp-disable-in-terminal ()
@@ -741,6 +794,7 @@ does not have focus, as input from this terminal cannot be reliably read."
     (when
         (and (not (member terminal kkp--setup-visited-terminal-list))
              (frame-focus-state frame))
+      (kkp--verbose "focus changed to terminal; enabling KKP")
       (kkp-enable-in-terminal))))
 
 (defun kkp--display-symbol-keys-p (orig-fun &rest args)

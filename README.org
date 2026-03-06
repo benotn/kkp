@@ -60,6 +60,8 @@ By default, it is set to =(disambiguate-escape-codes report-alternate-keys)=.
 You can run your own functions at kkp terminal setup and teardown by hooking into =kkp-terminal-setup-complete-hook= and =kkp-terminal-teardown-complete-hook=.
 This can be helpful in the scenario below where only =disambiguate-escape-codes= is active for some reason.
 
+Set =kkp-verbose= to non-nil to echo KKP state and helpful messages to the echo area (e.g. when querying the terminal, enabling/tearing down, or when the terminal does not reply). Useful for debugging slow SSH or strange terminals.
+
 *** No =report-alternate-keys=
 
 Note that when you activate only =disambiguate-escape-codes= (or your terminal does only support this enhancement),
@@ -72,6 +74,16 @@ This means "M-S-." (Meta-Shift-.) is not translated to "M-:" (on a German keyboa
 #+end_src
 
 For an automated solution, see the code setup in [[https://github.com/benotn/kkp/issues/15#issue-2782693357][this issue]] (and consider using the newly introduced hooks).
+
+** Testing
+
+The package includes ERT tests that mimic a strangely behaved terminal
+(malformed replies, garbage bytes, wrong prefix/terminator) and slow SSH
+(no reply within timeout, partial reply). Run them in batch:
+
+#+begin_src shell
+  emacs -batch -l ert -l kkp.el -l kkp-tests.el -f ert-run-tests-batch-and-exit
+#+end_src
 
 ** Debugging
 
