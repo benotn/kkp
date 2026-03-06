@@ -656,12 +656,12 @@ Restore the original `local-function-key-map` for the first frame on TERMINAL’
 display by removing `kkp-alternatives-map` as a parent. Once done, the parameter
 `kkp-setup-function-keys` on TERMINAL is reset so that setup can be applied
 again later if needed."
-  (let ((frame (car (frames-on-display-list terminal))))
-    (when (terminal-parameter terminal 'kkp-setup-function-keys)
+  (when (terminal-parameter terminal 'kkp-setup-function-keys)
+    (dolist (frame (frames-on-display-list terminal))
       ;; Map certain keypad keys into ASCII characters that people usually expect.
       (with-selected-frame frame
-        (set-keymap-parent local-function-key-map (keymap-parent kkp-alternatives-map)))
-      (set-terminal-parameter terminal 'kkp-setup-function-keys nil))))
+        (set-keymap-parent local-function-key-map (keymap-parent kkp-alternatives-map))))
+    (set-terminal-parameter terminal 'kkp-setup-function-keys nil)))
 
 
 (defun kkp--terminal-teardown (terminal)
@@ -677,12 +677,12 @@ again later if needed."
     (kkp-teardown-function-keys terminal)
     (send-string-to-terminal (kkp--csi-escape "<u") terminal)
 
-    (normal-erase-is-backspace-mode (terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val))
-
-    (with-selected-frame (car (frames-on-display-list terminal))
-      (dolist (prefix kkp--key-prefixes)
-        (compat-call define-key input-decode-map (kkp--csi-escape (string prefix)) nil t))
-      (run-hooks 'kkp-terminal-teardown-complete-hook)))
+    (dolist (frame (frames-on-display-list terminal))
+      (with-selected-frame frame
+        (normal-erase-is-backspace-mode (terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val))
+        (dolist (prefix kkp--key-prefixes)
+          (compat-call define-key input-decode-map (kkp--csi-escape (string prefix)) nil t))
+        (run-hooks 'kkp-terminal-teardown-complete-hook))))
   ;; We want to remove the terminal anyway from the active terminal list
   ;; Either we just tore it down, or it is not live anyway and should not be on the list.
   (setq kkp--active-terminal-list (delete terminal kkp--active-terminal-list)))
@@ -722,15 +722,17 @@ does not have focus, as input from this terminal cannot be reliably read."
                 (send-string-to-terminal (kkp--csi-escape (format ">%su" enhancement-flag)) terminal)
                 (kkp-setup-function-keys terminal)
                 (set-terminal-parameter terminal 'kkp--previous-normal-erase-is-backspace-val (terminal-parameter terminal 'normal-erase-is-backspace))
-                (normal-erase-is-backspace-mode 1)
-                (with-selected-frame (car (frames-on-display-list terminal))
-                  (dolist (prefix kkp--key-prefixes)
-                    (define-key input-decode-map (kkp--csi-escape (string prefix))
-                                (lambda (_prompt) (kkp--process-keys prefix))))
-                  (run-hooks 'kkp-terminal-setup-complete-hook))
-                (kkp--verbose "setup complete; enhancements active"))))))
-    (kkp--verbose "setup response did not match (slow SSH? non-Kitty?); %s"
-                  (kkp--format-bytes-and-readable terminal-input))))
+                (dolist (frame (frames-on-display-list terminal))
+                  (with-selected-frame frame
+                    (normal-erase-is-backspace-mode 1)
+                    ;; we register functions for each prefix to not interfere with e.g., M-[ I
+                    (dolist (prefix kkp--key-prefixes)
+                      (define-key input-decode-map (kkp--csi-escape (string prefix))
+                                  (lambda (_prompt) (kkp--process-keys prefix))))
+                    (run-hooks 'kkp-terminal-setup-complete-hook)))
+                (kkp--verbose "setup complete; enhancements active")))))
+      (kkp--verbose "setup response did not match (slow SSH? non-Kitty?); %s"
+                    (kkp--format-bytes-and-readable terminal-input)))))
 
 
 (defun kkp--disable-in-active-terminals()
