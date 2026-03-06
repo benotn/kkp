@@ -1,6 +1,6 @@
 ;;; kkp-debug.el --- Debugging helpers for Kitty Keyboard Protocol -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025  Benjamin Orthen
+;; Copyright (C) 2026  Benjamin Orthen
 ;; Author: Benjamin Orthen <contact@orthen.net>
 ;; Maintainer: Benjamin Orthen <contact@orthen.net>
 ;; Version: 0.4
