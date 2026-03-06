@@ -42,9 +42,10 @@ Once that is done, this package can be installed.
 #+begin_src emacs-lisp
     (use-package kkp
       :ensure t
+      :hook (tty-setup . global-kkp-mode)
       :config
       ;; (setq kkp-alt-modifier 'alt) ;; use this if you want to map the Alt keyboard modifier to Alt in Emacs (and not to Meta)
-      (global-kkp-mode +1))
+      )
 #+end_src
 
 ** Usage
