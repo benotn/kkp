@@ -698,6 +698,20 @@ TERMINAL defaults to the selected terminal."
       (push terminal kkp--suspended-terminal-list)
       (kkp--terminal-teardown terminal))))
 
+(defun kkp--pre-delete-frame (&optional frame &rest _)
+  "Disable KKP before FRAME's terminal loses its connection.
+On client frames (e.g. `emacsclient -nw'), `delete-terminal-functions' can fire
+too late for `send-string-to-terminal' to reach the tty, leading to mangled
+keystrokes in the outer terminal. Running the teardown from a `:before' advice
+on `delete-frame' guarantees the CSI bytes land while the frame, terminal, and
+output pipe are all still live. Only acts when FRAME is the last frame on its
+terminal."
+  (let* ((frame (or frame (selected-frame)))
+         (terminal (frame-terminal frame)))
+    (when (and (member terminal kkp--active-terminal-list)
+               (null (cdr (frames-on-display-list terminal))))
+      (kkp--terminal-teardown terminal))))
+
 (defun kkp--resume-in-terminal (&optional terminal)
   "Restore KKP in TERMINAL if it was active before suspension.
 TERMINAL defaults to the selected terminal."
@@ -772,6 +786,7 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (add-hook 'suspend-resume-hook #'kkp--resume-in-terminal)
     (add-hook 'suspend-tty-functions #'kkp--suspend-in-terminal)
     (add-hook 'resume-tty-functions #'kkp--resume-in-terminal)
+    (advice-add 'delete-frame :before #'kkp--pre-delete-frame)
 
 
     ;; this is by far the most reliable method to enable kkp in all associated terminals
@@ -794,6 +809,7 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (remove-hook 'suspend-resume-hook #'kkp--resume-in-terminal)
     (remove-hook 'suspend-tty-functions #'kkp--suspend-in-terminal)
     (remove-hook 'resume-tty-functions #'kkp--resume-in-terminal)
+    (advice-remove 'delete-frame #'kkp--pre-delete-frame)
     (remove-function after-focus-change-function #'kkp-focus-change)
     (setq delete-terminal-functions (delete #'kkp--terminal-teardown delete-terminal-functions)))))
 
