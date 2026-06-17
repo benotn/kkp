@@ -741,17 +741,33 @@ does not have focus, as input from this terminal cannot be reliably read."
     (kkp--terminal-teardown terminal)))
 
 
-(defun kkp--suspend-in-terminal()
-  "If the terminal has activate KKP, disable it before suspending."
-  (let ((terminal (kkp--selected-terminal)))
+(defun kkp--suspend-in-terminal (&optional terminal)
+  "If TERMINAL has active KKP, disable it before suspending.
+TERMINAL defaults to the selected terminal."
+  (let ((terminal (or terminal (kkp--selected-terminal))))
     (when (member terminal kkp--active-terminal-list)
       (kkp--verbose "suspending: tearing down KKP in terminal")
       (push terminal kkp--suspended-terminal-list)
       (kkp--terminal-teardown terminal))))
 
-(defun kkp--resume-in-terminal()
-  "Restore KKP in resumed terminals where it was active before suspension."
-  (let ((terminal (kkp--selected-terminal)))
+(defun kkp--pre-delete-frame (&optional frame &rest _)
+  "Disable KKP before FRAME's terminal loses its connection.
+On client frames (e.g. `emacsclient -nw'), `delete-terminal-functions' can fire
+too late for `send-string-to-terminal' to reach the tty, leading to mangled
+keystrokes in the outer terminal. Running the teardown from a `:before' advice
+on `delete-frame' guarantees the CSI bytes land while the frame, terminal, and
+output pipe are all still live. Only acts when FRAME is the last frame on its
+terminal."
+  (let* ((frame (or frame (selected-frame)))
+         (terminal (frame-terminal frame)))
+    (when (and (member terminal kkp--active-terminal-list)
+               (null (cdr (frames-on-display-list terminal))))
+      (kkp--terminal-teardown terminal))))
+
+(defun kkp--resume-in-terminal (&optional terminal)
+  "Restore KKP in TERMINAL if it was active before suspension.
+TERMINAL defaults to the selected terminal."
+  (let ((terminal (or terminal (kkp--selected-terminal))))
     (when (member terminal kkp--suspended-terminal-list)
       (kkp--verbose "resuming: re-enabling KKP in terminal")
       (setq kkp--suspended-terminal-list (delete terminal kkp--suspended-terminal-list))
@@ -824,6 +840,10 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (add-to-list 'delete-terminal-functions #'kkp--terminal-teardown)
     (add-hook 'suspend-hook #'kkp--suspend-in-terminal)
     (add-hook 'suspend-resume-hook #'kkp--resume-in-terminal)
+    (add-hook 'suspend-tty-functions #'kkp--suspend-in-terminal)
+    (add-hook 'resume-tty-functions #'kkp--resume-in-terminal)
+    (advice-add 'delete-frame :before #'kkp--pre-delete-frame)
+
 
     ;; this is by far the most reliable method to enable kkp in all associated terminals
     ;; trying to switch to each terminal with `with-selected-frame' does not work very well
@@ -843,6 +863,9 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (remove-hook 'kill-emacs-hook #'kkp--disable-in-active-terminals)
     (remove-hook 'suspend-hook #'kkp--suspend-in-terminal)
     (remove-hook 'suspend-resume-hook #'kkp--resume-in-terminal)
+    (remove-hook 'suspend-tty-functions #'kkp--suspend-in-terminal)
+    (remove-hook 'resume-tty-functions #'kkp--resume-in-terminal)
+    (advice-remove 'delete-frame #'kkp--pre-delete-frame)
     (remove-function after-focus-change-function #'kkp-focus-change)
     (setq delete-terminal-functions (delete #'kkp--terminal-teardown delete-terminal-functions)))))
 
