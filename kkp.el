@@ -759,8 +759,10 @@ on `delete-frame' guarantees the CSI bytes land while the frame, terminal, and
 output pipe are all still live. Only acts when FRAME is the last frame on its
 terminal."
   (let* ((frame (or frame (selected-frame)))
-         (terminal (frame-terminal frame)))
-    (when (and (member terminal kkp--active-terminal-list)
+         (live-frame-p (frame-live-p frame))
+         (terminal (and live-frame-p (frame-terminal frame))))
+    (when (and live-frame-p
+               (member terminal kkp--active-terminal-list)
                (null (cdr (frames-on-display-list terminal))))
       (kkp--terminal-teardown terminal))))
 
