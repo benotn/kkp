@@ -683,7 +683,7 @@ again later if needed."
         (dolist (prefix kkp--key-prefixes)
           (compat-call define-key input-decode-map (kkp--csi-escape (string prefix)) nil t))
         (run-hooks 'kkp-terminal-teardown-complete-hook))))
-  ;; We want to remove the terminal anyway from the active terminal list
+  ;; We want to remove the terminal from the active terminal list.
   ;; Either we just tore it down, or it is not live anyway and should not be on the list.
   (setq kkp--active-terminal-list (delete terminal kkp--active-terminal-list)))
 
@@ -759,7 +759,8 @@ on `delete-frame' guarantees the CSI bytes land while the frame, terminal, and
 output pipe are all still live. Only acts when FRAME is the last frame on its
 terminal."
   (let* ((frame (or frame (selected-frame)))
-         (terminal (frame-terminal frame)))
+         (terminal (and (frame-live-p frame)
+                        (frame-terminal frame))))
     (when (and (member terminal kkp--active-terminal-list)
                (null (cdr (frames-on-display-list terminal))))
       (kkp--terminal-teardown terminal))))
