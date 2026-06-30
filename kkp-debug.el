@@ -231,5 +231,83 @@ Output is arranged in aligned columns for clarity."
           (princ (format "%-45s %s\n" "After all key translation maps:" (key-description translated-keys)))
           (princ (format "%-45s %s\n" "Final command binding (in this help buffer):" (or (key-binding translated-keys) "undefined"))))))))
 
+(defun kkp-debug--princ-recorded-state (state)
+  "Print the recorded kkp STATE (a `kkp--state' or nil) to standard output."
+  (if (null state)
+      (princ "  (none -- KKP has not touched this terminal)\n")
+    (let ((flag (kkp--state-enhancements state)))
+      (princ (format "  %-30s %s%s\n" "active (enhancements):"
+                     (or flag "nil")
+                     (if flag
+                         (format "  (%s)"
+                                 (mapconcat #'symbol-name
+                                            (kkp--enhancements-from-flags flag)
+                                            " "))
+                       "")))
+      (princ (format "  %-30s %s\n" "setup-started:"
+                     (kkp--state-setup-started state)))
+      (princ (format "  %-30s %s\n" "setup-visited:"
+                     (kkp--state-setup-visited state)))
+      (princ (format "  %-30s %s\n" "suspended:"
+                     (kkp--state-suspended state)))
+      (princ (format "  %-30s %s\n" "legacy-active:"
+                     (kkp--state-legacy-active state)))
+      (princ (format "  %-30s %s\n" "function-keys-set:"
+                     (kkp--state-function-keys-set state)))
+      (princ (format "  %-30s %s\n" "previous-normal-erase:"
+                     (kkp--state-previous-normal-erase state))))))
+
+;;;###autoload
+(defun kkp-debug-show-terminal-state ()
+  "Display KKP state for the selected terminal in a help buffer.
+Shows both what kkp has recorded (the `kkp--state' struct) and what the
+terminal reports live, which is useful for spotting a desync between the
+two (e.g. while a `kkp-with-legacy-keys' region is active, or if an
+intermediary stripped the protocol).
+
+Use `kkp-debug-show-all-terminal-states' for a recorded-only overview of
+every terminal."
+  (interactive)
+  (let* ((terminal (kkp--selected-terminal))
+         (state (kkp--terminal-state terminal))
+         ;; Live queries first (they read from the terminal); guard against
+         ;; non-replying terminals so the report still renders.
+         (supported (condition-case err
+                        (if (kkp--this-terminal-supports-kkp-p) "yes" "no")
+                      (error (format "error: %s" (error-message-string err)))))
+         (enabled-live (if (equal supported "yes")
+                           (condition-case err
+                               (let ((e (kkp--this-terminal-enabled-enhancements)))
+                                 (if e (mapconcat #'symbol-name e " ") "(none)"))
+                             (error (format "error: %s" (error-message-string err))))
+                         "(terminal does not support KKP)")))
+    (with-help-window "*KKP Terminal State*"
+      (princ (format "%-32s %s\n" "Terminal:" terminal))
+      (princ (format "%-32s %s\n" "Graphic display:"
+                     (if (display-graphic-p terminal) "yes" "no")))
+      (princ (format "%-32s %s\n" "Supports KKP (live query):" supported))
+      (princ (format "%-32s %s\n" "Enabled enhancements (live):" enabled-live))
+      (princ "\n")
+      (princ "Recorded kkp--state:\n")
+      (kkp-debug--princ-recorded-state state))))
+
+;;;###autoload
+(defun kkp-debug-show-all-terminal-states ()
+  "Display the recorded KKP `kkp--state' of every live terminal in a help buffer.
+This reads only kkp's recorded state, with no terminal queries, so it is
+safe for terminals other than the selected one (which cannot be queried
+reliably).  Use `kkp-debug-show-terminal-state' to also query the selected
+terminal live."
+  (interactive)
+  (let ((selected (kkp--selected-terminal)))
+    (with-help-window "*KKP Terminal States*"
+      (dolist (terminal (terminal-list))
+        (princ (format "%-32s %s%s\n" "Terminal:" terminal
+                       (if (eq terminal selected) "  <- selected" "")))
+        (princ (format "%-32s %s\n" "Graphic display:"
+                       (if (display-graphic-p terminal) "yes" "no")))
+        (kkp-debug--princ-recorded-state (kkp--terminal-state terminal))
+        (princ "\n")))))
+
 (provide 'kkp-debug)
 ;;; kkp-debug.el ends here
