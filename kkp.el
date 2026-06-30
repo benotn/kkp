@@ -113,8 +113,8 @@ Possible values are the keys in `kkp--progressive-enhancement-flags'."
 
 (defconst kkp--modifiers
   '(choice (const shift) (const alt) (const control)
-    (const super) (const hyper) (const meta)
-    (const caps-lock) (const num-lock)))
+           (const super) (const hyper) (const meta)
+           (const caps-lock) (const num-lock)))
 
 ;; These mirror the behavior of `mac-command-modifier' and friends.
 ;; They specify which virtual key the physical key maps to.
@@ -356,8 +356,8 @@ It is one of the symbols `shift', `alt', `control', `super',
       (define-key map [iso-lefttab] [backtab])
       (define-key map [S-iso-lefttab] [backtab]))
     (and (or (eq system-type 'windows-nt)
-	     (featurep 'ns))
-	 (define-key map [S-tab] [backtab]))
+	         (featurep 'ns))
+	     (define-key map [S-tab] [backtab]))
     map)
   "Keymap of possible alternative meanings for some keys.")
 
