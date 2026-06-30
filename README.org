@@ -40,12 +40,16 @@ Once that is done, this package can be installed.
 *** use-package
 
 #+begin_src emacs-lisp
-    (use-package kkp
-      :ensure t
-      :hook (tty-setup . global-kkp-mode)
-      :config
-      ;; (setq kkp-alt-modifier 'alt) ;; use this if you want to map the Alt keyboard modifier to Alt in Emacs (and not to Meta)
-      )
+  (use-package kkp
+    :ensure t
+    :hook (tty-setup . global-kkp-mode)
+    :config
+    ;; (setq kkp-alt-modifier 'alt) ;; use this if you want to map the Alt keyboard modifier to Alt in Emacs (and not to Meta)
+
+    ;; For C-g aborting blocking subprocesses, see "C-g and blocking
+    ;; subprocesses" in the README.
+    ;; (setq kkp-restore-legacy-keys-around-subprocesses t)
+    )
 #+end_src
 
 ** Usage
@@ -62,6 +66,27 @@ This can be helpful in the scenario below where only =disambiguate-escape-codes=
 
 Set =kkp-verbose= to non-nil to echo KKP state and helpful messages to the echo area (e.g. when querying the terminal, enabling/tearing down, or when the terminal does not reply). Useful for debugging slow SSH or strange terminals.
 
+*** =C-g= and blocking subprocesses
+
+While KKP is active, the terminal sends =C-g= as an escape sequence (e.g. =\e[103;5u=) instead of the raw =quit-char= (7) byte.
+Emacs detects the quit character at the byte level, before =input-decode-map= runs, so =C-g= cannot abort a blocking, synchronous =call-process= / =process-file= (it still works at the top-level command loop).
+This is why, for example, =C-g= cannot abort a running [[https://github.com/purcell/envrc][envrc]]/direnv call.
+
+Two ways to restore the legacy single-byte encoding around such a call so =C-g= aborts it (both are no-ops when KKP is not active):
+
+1. Advise every =call-process=: set =kkp-restore-legacy-keys-around-subprocesses= to non-nil (default nil) before enabling =global-kkp-mode=.
+
+   #+begin_src emacs-lisp
+   (setq kkp-restore-legacy-keys-around-subprocesses t)
+   #+end_src
+
+2. Advise specific commands with the =kkp-restore-legacy-keys= =:around= advice (or wrap a region with the =kkp-with-legacy-keys= macro):
+
+   #+begin_src emacs-lisp
+   (with-eval-after-load 'envrc
+     (advice-add 'envrc--export :around #'kkp-restore-legacy-keys))
+   #+end_src
+
 *** No =report-alternate-keys=
 
 Note that when you activate only =disambiguate-escape-codes= (or your terminal does only support this enhancement),
@@ -73,7 +98,7 @@ This means "M-S-." (Meta-Shift-.) is not translated to "M-:" (on a German keyboa
 (define-key key-translation-map (kbd "M-S-.") (kbd "M-:"))
 #+end_src
 
-For an automated solution, see the code setup in [[https://github.com/benotn/kkp/issues/15#issue-2782693357][this issue]] (and consider using the newly introduced hooks).
+For an automated solution, see the code setup in [[https://github.com/benotn/kkp/issues/15#issue-2782693357][this issue]] (and consider using the =kkp-terminal-setup-complete-hook= and =kkp-terminal-teardown-complete-hook= hooks).
 
 ** Testing
 

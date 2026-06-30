@@ -78,6 +78,19 @@
 Useful for debugging slow SSH, strange terminals, or setup/teardown."
   :type 'boolean)
 
+(defcustom kkp-restore-legacy-keys-around-subprocesses nil
+  "When non-nil, advise `call-process' so `C-g' can abort blocking subprocesses.
+
+While KKP is active, `C-g' is sent as an escape sequence rather than the
+raw `quit-char' byte, so it cannot abort a blocking, synchronous
+`call-process' (e.g. direnv run from `envrc').  When non-nil,
+`global-kkp-mode' wraps `call-process' to restore legacy encoding for the
+call's duration.  Read when the mode is enabled, so set it beforehand.
+
+To affect only specific commands, use the `kkp-restore-legacy-keys' advice
+or the `kkp-with-legacy-keys' macro instead."
+  :type 'boolean)
+
 (defun kkp--verbose (format &rest args)
   "Like `message', but only when `kkp-verbose' is non-nil."
   (when kkp-verbose
@@ -342,6 +355,11 @@ It is one of the symbols `shift', `alt', `control', `super',
 
 (defvar kkp--suspended-terminal-list
   nil "Internal variable to track suspended terminals which have enabled KKP in activate state.")
+
+(defvar kkp--legacy-keys-terminals nil
+  "Terminals currently switched to legacy encoding by `kkp-with-legacy-keys'.
+Dynamically bound by the macro so nested forms on the same terminal toggle
+it only once, while different terminals are tracked independently.")
 
 (defvar kkp-terminal-setup-complete-hook nil
   "Hook run after KKP finishes terminal setup in a given terminal.")
@@ -781,6 +799,59 @@ TERMINAL defaults to the selected terminal."
       (kkp-enable-in-terminal terminal))))
 
 
+(defun kkp--set-encoding-flags (terminal flags)
+  "Push FLAGS onto TERMINAL's KKP flag stack.
+This uses the protocol's push command (CSI > flags u), so the previous
+flags can later be restored with `kkp--pop-encoding-flags'.  FLAGS of 0
+restores the legacy single-byte encoding of control keys."
+  (when (terminal-live-p terminal)
+    (send-string-to-terminal (kkp--csi-escape (format ">%su" flags)) terminal)
+    (kkp--flush-standard-output)))
+
+(defun kkp--pop-encoding-flags (terminal)
+  "Pop one entry off TERMINAL's KKP flag stack (CSI < u).
+Restores the flags that were in effect before the matching push."
+  (when (terminal-live-p terminal)
+    (send-string-to-terminal (kkp--csi-escape "<u") terminal)
+    (kkp--flush-standard-output)))
+
+(defmacro kkp-with-legacy-keys (&rest body)
+  "Run BODY with KKP key encoding temporarily disabled in the selected terminal.
+While BODY runs in a terminal where KKP is active, the terminal is asked to
+revert to the legacy single-byte encoding of control keys, so that `C-g'
+arrives as the raw `quit-char' byte and can interrupt blocking subprocess
+calls such as a synchronous `call-process'.  The previous KKP flags are
+restored afterwards, even if BODY exits non-locally.
+
+This is a no-op when KKP is not active in the selected terminal, and is
+not re-applied for nested forms."
+  (declare (indent 0) (debug t))
+  (let ((term (make-symbol "terminal")))
+    `(let ((,term (kkp--selected-terminal)))
+       (if (or (member ,term kkp--legacy-keys-terminals)
+               (not (member ,term kkp--active-terminal-list)))
+           (progn ,@body)
+         (kkp--set-encoding-flags ,term 0)
+         (unwind-protect
+             (let ((kkp--legacy-keys-terminals (cons ,term kkp--legacy-keys-terminals)))
+               ,@body)
+           (kkp--pop-encoding-flags ,term))))))
+
+(defun kkp-restore-legacy-keys (orig-fun &rest args)
+  "Call ORIG-FUN with ARGS while KKP key encoding is temporarily disabled.
+Intended for use as `:around' advice on a function that runs a blocking,
+synchronous subprocess and relies on `C-g' to abort it (see the
+discussion in `kkp-restore-legacy-keys-around-subprocesses').  Attach it to
+exactly the commands you need, for example:
+
+  (advice-add \\='envrc--export :around #\\='kkp-restore-legacy-keys)
+
+While ORIG-FUN runs in a terminal where KKP is active, `C-g' reaches Emacs
+as the raw `quit-char' byte and can interrupt the subprocess.  It is a
+no-op in terminals where KKP is not active."
+  (kkp-with-legacy-keys (apply orig-fun args)))
+
+
 (cl-defun kkp-enable-in-terminal (&optional (terminal (kkp--selected-terminal)))
   "Try to enable KKP support in Emacs running in the TERMINAL."
   (interactive)
@@ -850,6 +921,9 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (add-hook 'suspend-tty-functions #'kkp--suspend-in-terminal)
     (add-hook 'resume-tty-functions #'kkp--resume-in-terminal)
     (advice-add 'delete-frame :before #'kkp--pre-delete-frame)
+    ;; opt-in: let C-g abort blocking call-process calls (see the defcustom)
+    (when kkp-restore-legacy-keys-around-subprocesses
+      (advice-add 'call-process :around #'kkp-restore-legacy-keys))
 
 
     ;; this is by far the most reliable method to enable kkp in all associated terminals
@@ -873,6 +947,7 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
     (remove-hook 'suspend-tty-functions #'kkp--suspend-in-terminal)
     (remove-hook 'resume-tty-functions #'kkp--resume-in-terminal)
     (advice-remove 'delete-frame #'kkp--pre-delete-frame)
+    (advice-remove 'call-process #'kkp-restore-legacy-keys)
     (remove-function after-focus-change-function #'kkp-focus-change)
     (setq delete-terminal-functions (delete #'kkp--terminal-teardown delete-terminal-functions)))))
 
