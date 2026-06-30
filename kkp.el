@@ -83,6 +83,14 @@ Useful for debugging slow SSH, strange terminals, or setup/teardown."
   (when kkp-verbose
     (apply #'message (concat "[KKP] " format) args)))
 
+(defmacro kkp--flush-standard-output ()
+  "Flush buffered terminal output, when possible.
+`flush-standard-output' only exists on Emacs 29+, while kkp supports
+Emacs 27.1+ and compat does not backport it; this is a no-op on earlier
+versions."
+  '(when (fboundp 'flush-standard-output)
+     (flush-standard-output)))
+
 (defun kkp--format-bytes-and-readable (bytes)
   "Return a string describing BYTES in both byte list and human-readable form.
 BYTES is a list of character codes (integers), or a string (converted via
@@ -550,8 +558,7 @@ This function returns the Emacs keybinding associated with the sequence read."
   (kkp--verbose "query (sync): sending CSI %S (timeout %s s)" query (or kkp-terminal-query-timeout "none"))
   (discard-input)
   (send-string-to-terminal (kkp--csi-escape query))
-  (when (fboundp 'flush-standard-output)
-    (flush-standard-output))
+  (kkp--flush-standard-output)
   (let ((loop-cond t)
         (terminal-input nil))
     (while loop-cond
@@ -588,8 +595,7 @@ This function code is copied from `xterm--query'."
       (funcall register handlers)
       (kkp--verbose "query (async): sending CSI %S to terminal" query)
       (send-string-to-terminal (kkp--csi-escape query) terminal)
-      (when (fboundp 'flush-standard-output)
-        (flush-standard-output)))))
+      (kkp--flush-standard-output))))
 
 
 (defun kkp--this-terminal-enabled-enhancements ()
