@@ -635,6 +635,13 @@ This function code is copied from `xterm--query'."
                              []))))))
 
       (funcall register handlers)
+      ;; A `read-key-sequence' already in progress snapshotted `input-decode-map'
+      ;; before we registered our handler, so it would read the reply with the
+      ;; stale map and let `CSI ?' leak into a buffer as keys (issue #21/#32).
+      ;; Injecting a `switch-frame' event forces that read to restart
+      ;; (`replay_entire_sequence' in the C reader), re-reading `input-decode-map'
+      ;; -- now with our handler -- before it reads the reply.
+      (push (list 'switch-frame (selected-frame)) unread-command-events)
       (kkp--verbose "query (async): sending CSI %S to terminal" query)
       (send-string-to-terminal (kkp--csi-escape query) terminal)
       (kkp--flush-standard-output))))
