@@ -397,8 +397,8 @@ to keep in sync."
       (define-key map [iso-lefttab] [backtab])
       (define-key map [S-iso-lefttab] [backtab]))
     (and (or (eq system-type 'windows-nt)
-	         (featurep 'ns))
-	     (define-key map [S-tab] [backtab]))
+	     (featurep 'ns))
+	 (define-key map [S-tab] [backtab]))
     map)
   "Keymap of possible alternative meanings for some keys.")
 
@@ -838,6 +838,24 @@ Restores the flags that were in effect before the matching push."
     (send-string-to-terminal (kkp--csi-escape "<u") terminal)
     (kkp--flush-standard-output)))
 
+(defun kkp--reassert-encoding-flags (terminal)
+  "Re-assert TERMINAL's active KKP flags with the set command (CSI = flags ; 1 u).
+Some terminals (e.g. zellij) implement the protocol without the flag
+stack: they treat the pop command as a plain disable instead of restoring
+the previously pushed flags, so `kkp--pop-encoding-flags' alone would
+leave them in legacy mode for good.  Re-sending the flags with the set
+command fixes those terminals, while on stack-compliant terminals it
+merely overwrites the current stack entry with the flags it already
+holds, so it is a no-op.  Does nothing when KKP is not active in
+TERMINAL."
+  (when (terminal-live-p terminal)
+    (let ((state (kkp--terminal-state terminal)))
+      (when (and state (kkp--state-enhancements state))
+        (send-string-to-terminal
+         (kkp--csi-escape (format "=%s;1u" (kkp--state-enhancements state)))
+         terminal)
+        (kkp--flush-standard-output)))))
+
 (defmacro kkp-with-legacy-keys (&rest body)
   "Run BODY with KKP key encoding temporarily disabled in the selected terminal.
 While BODY runs in a terminal where KKP is active, the terminal is asked to
@@ -845,6 +863,11 @@ revert to the legacy single-byte encoding of control keys, so that `C-g'
 arrives as the raw `quit-char' byte and can interrupt blocking subprocess
 calls such as a synchronous `call-process'.  The previous KKP flags are
 restored afterwards, even if BODY exits non-locally.
+
+The restore both pops the pushed entry and re-asserts the active flags
+with the set command, because terminals that implement the protocol
+without the flag stack (e.g. zellij) treat the pop as a plain disable
+\(see `kkp--reassert-encoding-flags').
 
 This is a no-op when KKP is not active in the selected terminal, and is
 not re-applied for nested forms."
@@ -861,7 +884,8 @@ not re-applied for nested forms."
          (unwind-protect
              (progn ,@body)
            (setf (kkp--state-legacy-active ,state) nil)
-           (kkp--pop-encoding-flags ,term))))))
+           (kkp--pop-encoding-flags ,term)
+           (kkp--reassert-encoding-flags ,term))))))
 
 (defun kkp-restore-legacy-keys (orig-fun &rest args)
   "Call ORIG-FUN with ARGS while KKP key encoding is temporarily disabled.
