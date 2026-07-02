@@ -159,26 +159,31 @@ engages."
      (nreverse out)))
 
 (ert-deftest kkp-test/legacy-keys--brackets-body-when-active ()
-  "`kkp-with-legacy-keys' pushes flags 0 and pops around the body."
+  "`kkp-with-legacy-keys' pushes flags 0, then pops and re-asserts the flags.
+The trailing set command covers terminals without the flag stack (e.g.
+zellij), where the pop alone would leave KKP disabled."
   (should (equal (kkp-test--capture-terminal-output
-                   (kkp-with-legacy-keys (ignore)))
+                  (kkp-with-legacy-keys (ignore)))
                  (list (kkp--csi-escape ">0u")
-                       (kkp--csi-escape "<u")))))
+                       (kkp--csi-escape "<u")
+                       (kkp--csi-escape "=1;1u")))))
 
 (ert-deftest kkp-test/legacy-keys--pops-on-non-local-exit ()
   "The encoding is restored even when the body signals."
   (should (equal (kkp-test--capture-terminal-output
-                   (ignore-errors (kkp-with-legacy-keys (error "boom"))))
+                  (ignore-errors (kkp-with-legacy-keys (error "boom"))))
                  (list (kkp--csi-escape ">0u")
-                       (kkp--csi-escape "<u")))))
+                       (kkp--csi-escape "<u")
+                       (kkp--csi-escape "=1;1u")))))
 
 (ert-deftest kkp-test/legacy-keys--nested-toggles-once ()
   "Nested `kkp-with-legacy-keys' forms toggle the terminal only once."
   (should (equal (kkp-test--capture-terminal-output
-                   (kkp-with-legacy-keys
-                     (kkp-with-legacy-keys (ignore))))
+                  (kkp-with-legacy-keys
+                    (kkp-with-legacy-keys (ignore))))
                  (list (kkp--csi-escape ">0u")
-                       (kkp--csi-escape "<u")))))
+                       (kkp--csi-escape "<u")
+                       (kkp--csi-escape "=1;1u")))))
 
 (ert-deftest kkp-test/legacy-keys--noop-when-inactive ()
   "No terminal writes happen when the terminal has no active `kkp--state'."
@@ -205,7 +210,9 @@ engages."
                  (lambda (s &optional _terminal) (push s out))))
         (kkp-with-legacy-keys (ignore)))
       (should (equal (nreverse out)
-                     (list (kkp--csi-escape ">0u") (kkp--csi-escape "<u")))))
+                     (list (kkp--csi-escape ">0u")
+                           (kkp--csi-escape "<u")
+                           (kkp--csi-escape "=1;1u")))))
     ;; This terminal already in legacy mode suppresses re-toggling.
     (let* ((out nil)
            (states (list (cons 'fake-term (kkp--make-state :enhancements 1
@@ -241,15 +248,36 @@ Writes are captured per terminal to check both the byte and the target."
                    (list (cons 'term-a (kkp--csi-escape ">0u"))
                          (cons 'term-b (kkp--csi-escape ">0u"))
                          (cons 'term-b (kkp--csi-escape "<u"))
-                         (cons 'term-a (kkp--csi-escape "<u")))))))
+                         (cons 'term-b (kkp--csi-escape "=1;1u"))
+                         (cons 'term-a (kkp--csi-escape "<u"))
+                         (cons 'term-a (kkp--csi-escape "=1;1u")))))))
+
+(ert-deftest kkp-test/legacy-keys--reasserts-terminal-flags ()
+  "The restore re-asserts the flags the terminal actually has active.
+Terminals without the flag stack (e.g. zellij) disable KKP on pop, so the
+set command must carry the real enhancement integer, not a constant."
+  (let ((out nil)
+        (states (list (cons 'fake-term (kkp--make-state :enhancements 5)))))
+    (cl-letf (((symbol-function 'kkp--selected-terminal) (lambda () 'fake-term))
+              ((symbol-function 'terminal-live-p) (lambda (_) t))
+              ((symbol-function 'kkp--terminal-state)
+               (lambda (term) (cdr (assq term states))))
+              ((symbol-function 'send-string-to-terminal)
+               (lambda (s &optional _terminal) (push s out))))
+      (kkp-with-legacy-keys (ignore)))
+    (should (equal (nreverse out)
+                   (list (kkp--csi-escape ">0u")
+                         (kkp--csi-escape "<u")
+                         (kkp--csi-escape "=5;1u"))))))
 
 (ert-deftest kkp-test/restore-legacy-keys--brackets-the-call ()
   "`kkp-restore-legacy-keys' (the public advice) brackets ORIG-FUN when active.
 It does not consult any defcustom; gating happens at the advice-install site."
   (should (equal (kkp-test--capture-terminal-output
-                   (kkp-restore-legacy-keys (lambda (&rest _) 0) "true"))
+                  (kkp-restore-legacy-keys (lambda (&rest _) 0) "true"))
                  (list (kkp--csi-escape ">0u")
-                       (kkp--csi-escape "<u")))))
+                       (kkp--csi-escape "<u")
+                       (kkp--csi-escape "=1;1u")))))
 
 (ert-deftest kkp-test/restore-legacy-keys--nested-advice-toggles-once ()
   "Stacking the advice (e.g. process-file delegating to call-process) toggles once.
@@ -258,9 +286,10 @@ The inner call must see the legacy switch already in effect and not re-toggle."
               (outer (&rest _)
                 (kkp-restore-legacy-keys #'inner "true")))
     (should (equal (kkp-test--capture-terminal-output
-                     (kkp-restore-legacy-keys #'outer "true"))
+                    (kkp-restore-legacy-keys #'outer "true"))
                    (list (kkp--csi-escape ">0u")
-                         (kkp--csi-escape "<u"))))))
+                         (kkp--csi-escape "<u")
+                         (kkp--csi-escape "=1;1u"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Key-translation regressions for closed issues
