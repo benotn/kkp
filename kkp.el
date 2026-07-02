@@ -595,8 +595,11 @@ This is the inverse of `kkp--calculate-flags-integer'."
         (push (car bind) enhancements)))))
 
 
-(defun kkp--query-terminal-sync (query)
-  "Send QUERY to TERMINAL (to current if nil) and return response (if any)."
+(defun kkp--query-terminal-sync (query &optional terminator)
+  "Send QUERY to the current terminal and return its response (if any).
+Read events until TERMINATOR (a character) is received, then stop.
+When TERMINATOR is nil, or the terminal
+never sends it, keep reading until the timeout elapses with no more input."
   (kkp--verbose "query (sync): sending CSI %S (timeout %s s)" query (or kkp-terminal-query-timeout "none"))
   (discard-input)
   (send-string-to-terminal (kkp--csi-escape query))
@@ -605,9 +608,11 @@ This is the inverse of `kkp--calculate-flags-integer'."
         (terminal-input nil))
     (while loop-cond
       (let ((evt (read-event nil nil kkp-terminal-query-timeout)))
-        (if (null evt)
-            (setq loop-cond nil)
-          (push evt terminal-input))))
+        (cond
+         ((null evt) (setq loop-cond nil))
+         (t (push evt terminal-input)
+            (when (eql evt terminator)
+              (setq loop-cond nil))))))
     (let ((reply (nreverse terminal-input)))
       (kkp--verbose "query (sync): got %s bytes%s" (length reply)
                     (if (null reply)
@@ -647,27 +652,17 @@ This function code is copied from `xterm--query'."
       (kkp--flush-standard-output))))
 
 
-(defun kkp--this-terminal-enabled-enhancements ()
-  "Query the current terminal and return list of currently enabled enhancements."
-  (let ((reply (kkp--query-terminal-sync "?u")))
-    (when (not reply)
-      (kkp--verbose "terminal did not reply; possible slow SSH or non-KKP terminal")
-      (error "Terminal did not reply correctly to query"))
-    (kkp--enhancements-from-flags (- (nth 3 reply) ?0))))
+(defun kkp--reply-indicates-support-p (reply)
+  "Return non-nil when REPLY is a well-formed KKP `CSI ? flags u' response."
+  (and (member (length reply) '(5 6))
+       (equal '(27 91 63) (cl-subseq reply 0 3))
+       (eql 117 (car (last reply)))))
 
 
-(defun kkp--this-terminal-supports-kkp-p ()
-  "Check if the current terminal supports the Kitty Keyboard Protocol.
-This does not work well if checking for another terminal which
-does not have focus, as input from this terminal cannot be reliably read."
-  (kkp--verbose "checking if terminal supports KKP...")
-  (let ((reply (kkp--query-terminal-sync "?u")))
-    (let ((supported (and
-                      (member (length reply) '(5 6))
-                      (equal '(27 91 63) (cl-subseq reply 0 3))
-                      (eql 117 (car (last reply))))))
-      (kkp--verbose "terminal %s KKP (reply length=%s)" (if supported "supports" "does not support") (length reply))
-      supported)))
+(defun kkp--reply-enhancements (reply)
+  "Return the enhancements encoded in the flags byte of a KKP support REPLY."
+  (kkp--enhancements-from-flags (- (nth 3 reply) ?0)))
+
 
 (defun kkp--this-terminal-has-active-kkp-p()
   "Check if the current terminal has KKP activated."
@@ -994,12 +989,16 @@ This ensures display-symbols-key-p returns non nil in a terminal with KKP enable
 (defun kkp-status ()
   "Message, if terminal supports KKP, if yes, currently enabled enhancements."
   (interactive)
-  (if (kkp--this-terminal-supports-kkp-p)
-      (message "KKP supported in this terminal.\n%s"
-               (if (kkp--this-terminal-has-active-kkp-p)
-                   (format "KKP active in this terminal. Enabled enhancements: %s" (mapconcat 'symbol-name (kkp--this-terminal-enabled-enhancements) " and "))
-                 "KKP not active in this terminal."))
-    (message "KKP not supported in this terminal.")))
+  ;; A single `?u' query answers both questions: its shape tells us whether the
+  ;; terminal supports KKP, and its flags byte carries the enabled enhancements.
+  (let ((reply (kkp--query-terminal-sync "?u" ?u)))
+    (if (kkp--reply-indicates-support-p reply)
+        (message "KKP supported in this terminal.\n%s"
+                 (if (kkp--this-terminal-has-active-kkp-p)
+                     (format "KKP active in this terminal. Enabled enhancements: %s"
+                             (mapconcat 'symbol-name (kkp--reply-enhancements reply) " and "))
+                   "KKP not active in this terminal."))
+      (message "KKP not supported in this terminal."))))
 
 
 (provide 'kkp)

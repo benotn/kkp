@@ -29,55 +29,47 @@
 
 (ert-deftest kkp-test/strange-terminal--nil-reply ()
   "Mimic terminal that never responds (e.g. broken or non-KKP)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync) (lambda (_query) nil)))
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p nil)))
 
 (ert-deftest kkp-test/strange-terminal--empty-reply ()
   "Mimic terminal that sends nothing before timeout."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync) (lambda (_query) (list))))
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p (list))))
 
 (ert-deftest kkp-test/strange-terminal--wrong-length-short ()
   "Mimic terminal that sends too few bytes (e.g. truncated)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\e[?u"))))  ; only CSI?u, no flags
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p (kkp-test--events "\e[?u"))))  ; only CSI?u, no flags
 
 (ert-deftest kkp-test/strange-terminal--wrong-length-long ()
   "Mimic terminal that sends too many bytes (garbage or wrong protocol)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\e[?0123u"))))  ; 8 bytes
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p (kkp-test--events "\e[?0123u"))))  ; 8 bytes
 
 (ert-deftest kkp-test/strange-terminal--wrong-prefix ()
   "Mimic terminal that does not send CSI? (e.g. wrong escape sequence)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\eZ?0u"))))  ; ESC Z ? not ESC [ ?
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p (kkp-test--events "\eZ?0u"))))  ; ESC Z ? not ESC [ ?
 
 (ert-deftest kkp-test/strange-terminal--wrong-terminator ()
   "Mimic terminal that does not end with 'u' (e.g. different protocol)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\e[?0c"))))  ; ends with c not u
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p (kkp-test--events "\e[?0c"))))  ; ends with c not u
 
 (ert-deftest kkp-test/strange-terminal--garbage-bytes ()
   "Mimic terminal that sends random bytes before/after."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query)
+  (should-not (kkp--reply-indicates-support-p
                (append (kkp-test--events "\0\001\002")  ; NUL SOH STX
                        (kkp-test--events "\e[?0u")
                        (list 255 254)))))  ; garbage tail
-    (should-not (kkp--this-terminal-supports-kkp-p))))
 
 (ert-deftest kkp-test/strange-terminal--valid-reply ()
   "Sanity: valid KKP reply is recognized."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\e[?01u"))))
-    (should (kkp--this-terminal-supports-kkp-p)))
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\e[?0u"))))
-    (should (kkp--this-terminal-supports-kkp-p))))
+  (should (kkp--reply-indicates-support-p (kkp-test--events "\e[?01u")))
+  (should (kkp--reply-indicates-support-p (kkp-test--events "\e[?0u"))))
+
+(ert-deftest kkp-test/valid-reply--enhancements-decoded ()
+  "The flags byte of a valid reply decodes to the enabled enhancements."
+  (should-not (kkp--reply-enhancements (kkp-test--events "\e[?0u")))
+  (should (equal '(disambiguate-escape-codes)
+                 (kkp--reply-enhancements (kkp-test--events "\e[?1u"))))
+  (should (equal '(disambiguate-escape-codes report-alternate-keys)
+                 (kkp--reply-enhancements (kkp-test--events "\e[?5u")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Slow SSH: no or delayed response within kkp-terminal-query-timeout
@@ -85,20 +77,11 @@
 
 (ert-deftest kkp-test/slow-ssh--no-reply-within-timeout ()
   "Mimic slow SSH: terminal does not respond before timeout (empty reply)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync) (lambda (_query) (list))))
-    (should-not (kkp--this-terminal-supports-kkp-p))))
-
-(ert-deftest kkp-test/slow-ssh--enabled-enhancements-errors-on-no-reply ()
-  "Mimic slow SSH: query returns nil, enabled-enhancements should error."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync) (lambda (_query) nil)))
-    (should-error (kkp--this-terminal-enabled-enhancements)
-                  :type 'error)))
+  (should-not (kkp--reply-indicates-support-p (list))))
 
 (ert-deftest kkp-test/slow-ssh--partial-reply ()
   "Mimic slow SSH: terminal sends only part of reply before timeout (e.g. CSI? only)."
-  (cl-letf (((symbol-function 'kkp--query-terminal-sync)
-             (lambda (_query) (kkp-test--events "\e[?"))))  ; only CSI?, no flags nor u
-    (should-not (kkp--this-terminal-supports-kkp-p))))
+  (should-not (kkp--reply-indicates-support-p (kkp-test--events "\e[?"))))  ; only CSI?, no flags nor u
 
 ;; ---------------------------------------------------------------------------
 ;; Strange terminal: malformed or unexpected input to key translation

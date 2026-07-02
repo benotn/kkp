@@ -270,16 +270,16 @@ every terminal."
   (interactive)
   (let* ((terminal (kkp--selected-terminal))
          (state (kkp--terminal-state terminal))
-         ;; Live queries first (they read from the terminal); guard against
-         ;; non-replying terminals so the report still renders.
-         (supported (condition-case err
-                        (if (kkp--this-terminal-supports-kkp-p) "yes" "no")
-                      (error (format "error: %s" (error-message-string err)))))
-         (enabled-live (if (equal supported "yes")
-                           (condition-case err
-                               (let ((e (kkp--this-terminal-enabled-enhancements)))
-                                 (if e (mapconcat #'symbol-name e " ") "(none)"))
-                             (error (format "error: %s" (error-message-string err))))
+         ;; A single live `?u' query answers both questions: its shape tells us
+         ;; whether the terminal supports KKP, and its flags byte carries the
+         ;; enabled enhancements.  Guard against errors so the report still
+         ;; renders (a non-replying terminal simply yields a nil reply).
+         (reply (ignore-errors (kkp--query-terminal-sync "?u" ?u)))
+         (supported-p (kkp--reply-indicates-support-p reply))
+         (supported (if supported-p "yes" "no"))
+         (enabled-live (if supported-p
+                           (let ((e (kkp--reply-enhancements reply)))
+                             (if e (mapconcat #'symbol-name e " ") "(none)"))
                          "(terminal does not support KKP)")))
     (with-help-window "*KKP Terminal State*"
       (princ (format "%-32s %s\n" "Terminal:" terminal))
